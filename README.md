@@ -1,89 +1,117 @@
 # EVE LangBridge
 
-Локальный переводчик чата **EVE Online**. Движок (llama.cpp) и модель
-работают на вашем компьютере: без облака, подписок и отправки переписки
-наружу.
+[Русский](#русский) | [English](#english) | [中文](#中文)
 
-> Неофициальный проект. EVE Online — торговая марка CCP hf.
-> Приложение не связано с CCP и не одобрено ею.
+---
 
-## Возможности
+## Русский
 
-- Перевод чата в реальном времени прямо из логов EVE — ничего настраивать
-  в игре не нужно.
-- **Работает с несколькими окнами игры**: чаты всех клиентов попадают
-  в одну вкладку, одинаковые сообщения не дублируются.
-- Локальный движок `llama-server` и модель на выбор (Hy-MT2 1.8B или
-  Qwen3 1.7B). Видеокарта не обязательна — есть режим CPU.
-- **Защита терминов**: названия кораблей, модулей и систем не переводятся
-  и не искажаются.
-- **Словарь сленга и свои слова**: `gj`, `wtb`, `o7`, названия корпораций —
-  можно запретить перевод или задать свою замену. Три языка.
-- Настройка «Названия EVE»: показывать названия по-английски (как в русском
-  клиенте) или по-китайски (как в китайском).
-- Значок в трее, сворачивание до верхней панели, проверка обновлений.
-- Интерфейс на русском, английском и китайском.
+Переводит чат EVE Online локально и в реальном времени. Иностранные сообщения
+появляются в окне чата уже переведёнными — не нужно переключаться на переводчик
+или копировать текст.
 
-## Установка
+Всё работает на вашем компьютере: без аккаунтов, подписок и облачных сервисов,
+переписка остаётся у вас.
 
-1. Скачайте `EVE-LangBridge-<версия>-setup.exe` со страницы
-   [Releases](https://github.com/psych3del1c/EVE-LangBridge/releases).
-2. Запустите. Windows может показать «Неизвестный издатель» — это нормально
-   для сборки без платного сертификата: «Подробнее» → «Всё равно запустить».
-3. Выберите папку (можно на другой диск — модели будут лежать там же,
-   диск `C:` не засоряется).
-4. При первом запуске мастер предложит скачать движок (~36 МБ) и модель
-   (~1.1 ГБ). Дальше всё работает офлайн.
+### Зачем это вам
 
-Есть и портативный вариант: распакуйте архив и запустите
-`EVE LangBridge.exe` — данные появятся в папке `data` рядом с программой.
+- Читать любой чат — Local, корпоративный, альянсовый, помощь — не выходя из игры.
+- Работает с несколькими окнами игры: сообщение, пришедшее во все, показывается один раз.
+- Названия кораблей, модулей и систем остаются такими, как в игре.
+- Свои слова: сленг можно оставить как есть или заменить на понятный перевод.
 
-## Обновление
+### Установка
 
-Закройте приложение и запустите новый установщик **поверх** старого.
-Модели и настройки в папке `data` сохраняются — заново качать не нужно.
-Когда выйдет новая версия, шестерёнка в верхней панели станет янтарной,
-а в «О программе» появится ссылка на скачивание.
+1. Скачайте установщик со страницы Releases и запустите.
+   Сборка без подписи: Windows может написать «Неизвестный издатель» —
+   «Подробнее» → «Всё равно запустить».
+2. Выберите папку; модели сохраняются рядом с программой.
+3. При первом запуске мастер один раз скачает движок и модель (~1,2 ГБ).
+4. Запустите игру — новые сообщения появятся уже переведёнными.
 
-## Где лежат данные
+### Обновление
 
-`data` рядом с программой (или в `%LOCALAPPDATA%\EVE LangBridge`, если
-папка установки недоступна для записи):
+Запустите новый установщик поверх старого: настройки и модели сохранятся.
 
-```
-data/
-  config.json        настройки
-  slang.user.json    ваши слова (создаётся при первом добавлении)
-  models/            GGUF-модели
-  runtime/           llama-server
-  logs/              технические логи
-```
+### Лицензия
 
-## Сборка из исходников
+MIT. Сторонние компоненты и модели — в [THIRD_PARTY.md](THIRD_PARTY.md).
 
-Нужен Python 3.10+ и Windows.
+### Авторы
 
-```
-python -m venv venv
-venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-venv\Scripts\python.exe build_exe.py --installer
-```
+ker Egivand и Arnold Olympus для корпорации Sognare.
 
-Результат: `dist\EVE LangBridge\` (портативная версия) и
-`dist\EVE-LangBridge-<версия>-setup.exe` (установщик, нужен
-[Inno Setup 6/7](https://jrsoftware.org/isinfo.php)).
+---
 
-Запуск из исходников без сборки — `start.bat`.
+## English
 
-`eve_terms.json` уже лежит в репозитории. Пересобрать его из SDE можно
-скриптом `build_terms.py` (нужна папка `eve-online-static-data-*`).
+Translates EVE Online chat locally in real time. Foreign messages appear in your
+chat window already translated, so you can follow the conversation without
+switching to a translator or copying text.
 
-## Лицензия
+Everything runs on your computer: no accounts, subscriptions or cloud services,
+and your chat stays private.
 
-Код — [MIT](LICENSE). Сторонние компоненты и модели перечислены
-в [THIRD_PARTY.md](THIRD_PARTY.md).
+### Why use it
 
-## Авторы
+- Read any chat — local, corp, alliance, help — without leaving the game.
+- Works with several game clients; a message received by all of them is shown once.
+- Ship, module and system names stay exactly as they are in the game.
+- Add your own words: keep slang as is, or replace it with a clear translation.
 
-Разработано: **ker Egivand** и **Arnold Olympus** для корпорации
-**Sognare**.
+### Installation
+
+1. Download the installer from Releases and run it.
+   Unsigned build: Windows may show "Unknown publisher" — More info → Run anyway.
+2. Choose a folder; models are stored next to the program.
+3. On first launch the wizard downloads the engine and model once (~1.2 GB).
+4. Start the game — new messages will appear translated.
+
+### Updating
+
+Run the new installer over the old one; settings and models are kept.
+
+### License
+
+MIT. Third-party components and models are listed in
+[THIRD_PARTY.md](THIRD_PARTY.md).
+
+### Credits
+
+ker Egivand and Arnold Olympus for the Sognare corporation.
+
+---
+
+## 中文
+
+在本机实时翻译 EVE Online 聊天。外语消息会直接以翻译后的形式出现在聊天窗口中，
+不必切到翻译工具，也不用复制粘贴。
+
+一切都在您的电脑上运行：无需账号、订阅或云服务，聊天内容留在本机。
+
+### 适合您的理由
+
+- 不用离开游戏就能看懂任何聊天：本地、军团、联盟、帮助频道。
+- 支持多个游戏客户端：同一条消息在多个窗口收到时只显示一次。
+- 舰船、装备和星系名称保持游戏中的写法。
+- 可以添加自己的词：俚语可保持原样，也可替换为易懂的翻译。
+
+### 安装
+
+1. 从 Releases 下载安装程序并运行。
+   未签名版本可能提示“未知发布者”：更多信息 → 仍要运行。
+2. 选择安装目录；模型保存在程序旁边。
+3. 首次启动时，向导会下载一次引擎和模型（约 1.2 GB）。
+4. 启动游戏后，新消息会以翻译形式出现。
+
+### 更新
+
+运行新的安装程序覆盖安装，设置和模型会保留。
+
+### 许可证
+
+MIT。第三方组件和模型见 [THIRD_PARTY.md](THIRD_PARTY.md)。
+
+### 作者
+
+ker Egivand 和 Arnold Olympus，为 Sognare 公司开发。
