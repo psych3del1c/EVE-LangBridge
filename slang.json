@@ -1,0 +1,19 @@
+{
+    "version": 1,
+    "expand": {
+        "en": {},
+        "ru": {},
+        "zh": {}
+    },
+    "keep": [
+        "gj", "ty", "thx", "np", "dc", "mil", "clr",
+        "wtb", "wts", "wtt", "lfg", "lfm", "afk", "brb", "omw", "convo",
+        "bpc", "bpo", "fc", "logi", "dps", "cyno", "hotdrop", "tidi",
+        "hs", "ls", "ns", "wh", "sov", "ihub", "tcu", "anoms",
+        "втб", "втс", "кк", "лфг", "спс", "пж", "нули", "лоу",
+        "666", "yyds", "233",
+        "o7", "gf", "gg", "isk", "plex", "lp", "pvp", "pve", "npc",
+        "t1", "t2", "t3",
+        "jita", "amarr", "dodixie", "rens", "hek", "perimeter", "tama"
+    ]
+}
