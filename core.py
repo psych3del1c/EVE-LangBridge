@@ -99,7 +99,8 @@ class TermGuard:
         self._terms_file = terms_file
         # На каком языке показывать названия в переводе (en/ru/zh).
         self._display_lang = display_lang if display_lang in ("en", "ru", "zh") else "en"
-        self._display = {}
+        self._en_to = {}
+        self._display_cache = {}
         # Слова из словаря сленга с пометкой «не переводить»: защищаем их
         # так же, как термины, но не подсвечиваем в чате.
         self._extra_keep = [str(item).strip() for item in (extra_keep or [])
@@ -120,22 +121,29 @@ class TermGuard:
     def set_display_lang(self, lang):
         """Меняет язык названий в переводе (en/ru/zh)."""
         lang = lang if lang in ("en", "ru", "zh") else "en"
-        if lang == self._display_lang:
-            return
         self._display_lang = lang
-        self.terms = {}
-        self.highlight_terms = set()
-        self._display = {}
-        self._load_terms(self._terms_file)
-        self._loaded = True
-        with self._index_lock:
-            self._index = None
 
-    def display_name(self, english_name):
-        """Английское название -> форма для выбранного языка."""
-        if self._display_lang == "en" or not english_name:
+    def _display_map(self, lang):
+        """Карта «английское имя -> форма» для языка (с кэшем)."""
+        if lang == "en":
+            return {}
+        cached = self._display_cache.get(lang)
+        if cached is None:
+            cached = {}
+            for en, forms in self._en_to.items():
+                name = (forms or {}).get(lang)
+                if name:
+                    cached[str(en).lower()] = name
+            self._display_cache[lang] = cached
+        return cached
+
+    def display_name(self, english_name, lang=None):
+        """Английское название -> форма для языка (по умолчанию — общий)."""
+        lang = lang or self._display_lang
+        if lang == "en" or not english_name:
             return english_name
-        return self._display.get(str(english_name).lower(), english_name)
+        return self._display_map(lang).get(str(english_name).lower(),
+                                          english_name)
 
     # ---------- загрузка ----------
     def _load_terms(self, path):
@@ -168,13 +176,9 @@ class TermGuard:
             for item in self._extra_keep:
                 if item:
                     self.terms.setdefault(item.lower(), (item, False))
-            # Обратная карта: английское имя -> форма на языке показа.
-            self._display = {}
-            if self._display_lang != "en":
-                for en, forms in (data.get("en_to") or {}).items():
-                    name = (forms or {}).get(self._display_lang)
-                    if name:
-                        self._display[str(en).lower()] = name
+            # Обратная карта: английское имя -> формы на разных языках.
+            self._en_to = data.get("en_to") or {}
+            self._display_cache = {}
             self._loaded = True
         except Exception:
             pass
@@ -231,7 +235,7 @@ class TermGuard:
             return length, value
         return None
 
-    def _scan(self, text, mask):
+    def _scan(self, text, mask, display_lang=None):
         """Один проход. mask=True -> (текст с [[N]], [названия на языке показа])."""
         if not text:
             return text, []
@@ -250,7 +254,7 @@ class TermGuard:
                 i += 1
                 continue
             length, value = match
-            shown = self.display_name(value)
+            shown = self.display_name(value, display_lang)
             if mask:
                 out.append("[[%d]]" % len(replaced))
             else:
@@ -288,9 +292,9 @@ class TermGuard:
         return spans
 
     # ---------- публичный API ----------
-    def protect(self, text):
-        """Текст -> (текст с плейсхолдерами, список английских названий)."""
-        return self._scan(text, mask=True)
+    def protect(self, text, display_lang=None):
+        """Текст -> (текст с плейсхолдерами, список названий)."""
+        return self._scan(text, mask=True, display_lang=display_lang)
 
     def restore(self, text, replacements):
         """Возвращает английские названия на место плейсхолдеров."""
@@ -325,11 +329,11 @@ class TermGuard:
         missing = [name for i, name in enumerate(replacements) if not used[i]]
         return text, missing
 
-    def localize(self, text):
+    def localize(self, text, display_lang=None):
         """Приводит названия в тексте к выбранному языку показа."""
         if not text:
             return text, []
-        return self._scan(text, mask=False)
+        return self._scan(text, mask=False, display_lang=display_lang)
 
     # Старое имя оставлено, чтобы не сломать внешние вызовы.
     englishize = localize
@@ -657,9 +661,9 @@ class TranslatorEngine:
             text = best[0].rstrip() + " [" + ", ".join(best[1]) + "]"
             return self._finish(text, replacements)
 
-        # Метки не удержались: переводим без масок, названия потом
-        # вернёт englishize.
-        plain = self._translate(original, False)
+        # Метки не удержались: переводим без масок, но явно просим модель
+        # не переводить названия — иначе она сделает «Феникс» из «Phoenix».
+        plain = self._translate(original, False, keep_names=replacements)
         if plain and not self._looks_like_instruction(plain):
             return self._finish(plain, [])
         return None
@@ -721,6 +725,31 @@ class TranslatorEngine:
                     f"из каналов {list(channels)[:5]}")
         return count
 
+    def translate_outgoing(self, text, target_lang="en"):
+        """Перевод исходящего сообщения — напрямую, без словаря.
+
+        Панель перевода не подставляет названия из EVE-словаря: модель
+        переводит текст как есть, чтобы игрок сам решал, как писать ники
+        и названия кораблей.
+        """
+        text = (text or "").strip()
+        if not text:
+            return ""
+        lang_name = {"ru": "Russian", "en": "English",
+                     "zh": "Chinese"}.get(target_lang, "English")
+        prompt = self.system_prompt.replace("{target_lang}", lang_name)
+        try:
+            answer = self.backend.chat(
+                [{"role": "system", "content": prompt},
+                 {"role": "user", "content": text}],
+                temperature=0.2, timeout=60)
+        except Exception as exc:
+            app_log.log(f"outgoing: ошибка перевода {exc!r}")
+            return text
+        if not answer or self._looks_like_instruction(answer):
+            return text
+        return answer.strip() or text
+
     def _placeholder_hint(self, strict=False):
         """Короткая английская инструкция: её меньше шансов перевести."""
         hint = ("\nKeep tokens like [[0]] and [[1]] exactly as they are: "
@@ -730,7 +759,7 @@ class TranslatorEngine:
         return hint
 
     def _translate(self, text, has_placeholders=False,
-                   strict=False, temperature=None):
+                   strict=False, temperature=None, keep_names=None):
         if not text.strip():
             return ""
 
@@ -740,6 +769,15 @@ class TranslatorEngine:
         prompt = self.system_prompt.replace("{target_lang}", target_name)
         if has_placeholders:
             prompt += self._placeholder_hint(strict)
+        if keep_names:
+            names = []
+            for name in keep_names:
+                name = str(name).strip()
+                if name and name not in names:
+                    names.append(name)
+            if names:
+                prompt += ("\nKeep these names exactly as written, do not "
+                           "translate or change them: " + ", ".join(names))
 
         try:
             return self.backend.chat(

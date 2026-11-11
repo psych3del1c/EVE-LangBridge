@@ -19,6 +19,7 @@ from core import TranslatorEngine
 from wizard import SetupWizard
 from providers import create_backend, resolve_model, store_backend_config
 from version import VERSION
+from composer import Composer
 from app_icon import (
     make_tk_icon as _make_app_icon,
     make_pil_image as _make_app_image,
@@ -79,6 +80,14 @@ LOCK_BG_LOCKED = "#2e2e2e"
 LOCK_FG_LOCKED = "#d8b26a"
 LOCK_HOVER_LOCKED = "#3a3a3a"
 
+# Единая палитра кнопок в заголовке: бледный песочный акцент,
+# скруглённая плашка и мягкая окантовка.
+TITLE_ACCENT = "#cf9d45"
+TITLE_ACCENT_HOVER = "#dcae5c"
+TITLE_ACTIVE_BG = "#2b2110"
+TITLE_ACTIVE_BG_HOVER = "#362a14"
+TITLE_ACTIVE_BORDER = "#5a4620"
+
 TAB_FONT_FAMILY = "Segoe UI"
 TAB_TEXT_PADX = 6
 
@@ -121,6 +130,13 @@ LANGS = {
                        "Логи: {path}\nФайлов: {n}\n\n"
                        "Запустите игру и напишите в чат — сообщения появятся здесь."),
         "replay_setting": "Показывать последние сообщения при запуске",
+        "composer_placeholder": "Напишите сообщение…",
+        "composer_translating": "Перевод…",
+        "composer_error": "Не удалось перевести",
+        "composer_copied": "Скопировано",
+        "composer_autocopy": "Автоматически копировать перевод",
+        "composer_you": "вы:",
+        "composer_title": "Перевод",
         "dict_phrase": "Слово", "dict_action": "Действие",
         "dict_value": "Замена", "dict_lang": "Язык",
         "dict_source": "Источник", "dict_keep": "Не переводить",
@@ -200,6 +216,13 @@ LANGS = {
                        "Logs: {path}\nFiles: {n}\n\n"
                        "Start the game and write in chat — messages will appear here."),
         "replay_setting": "Show recent messages on startup",
+        "composer_placeholder": "Type a message…",
+        "composer_translating": "Translating…",
+        "composer_error": "Translation failed",
+        "composer_copied": "Copied",
+        "composer_autocopy": "Copy translation automatically",
+        "composer_you": "you:",
+        "composer_title": "Translation",
         "dict_phrase": "Word", "dict_action": "Action",
         "dict_value": "Replacement", "dict_lang": "Language",
         "dict_source": "Source", "dict_keep": "Do not translate",
@@ -279,6 +302,13 @@ LANGS = {
                        "日志：{path}\n文件数：{n}\n\n"
                        "启动游戏并在聊天中发言，消息会显示在这里。"),
         "replay_setting": "启动时显示最近消息",
+        "composer_placeholder": "输入消息…",
+        "composer_translating": "翻译中…",
+        "composer_error": "翻译失败",
+        "composer_copied": "已复制",
+        "composer_autocopy": "自动复制译文",
+        "composer_you": "你：",
+        "composer_title": "翻译",
         "dict_phrase": "词语", "dict_action": "操作",
         "dict_value": "替换为", "dict_lang": "语言",
         "dict_source": "来源", "dict_keep": "不翻译",
@@ -411,6 +441,8 @@ DEFAULT_CONFIG = {
         "last_update_check": 0,
         "latest_version": "",
         "replay_history": True,
+        "composer_lang": "en",
+        "composer_autocopy": True,
         "hide_original": False
     },
     "chats": {"all": [], "active": [], "current": None},
@@ -811,6 +843,140 @@ class EveTabBar(tk.Frame):
                 tab["btn"].configure(text=text)
 
 
+class _LockButton(tk.Canvas):
+    """Кнопка фиксации окна: надпись «lock», активна — оранжевая."""
+
+    def __init__(self, parent, command, bg="#1a1a1a"):
+        super().__init__(parent, width=40, height=24, bg=bg, bd=0,
+                         highlightthickness=0, cursor="hand2")
+        self._bg = bg
+        self._command = command
+        self._locked = False
+        self._hover = False
+        self._text = "lock"
+        self._font = tkfont.Font(family="Segoe UI", size=10,
+                                 weight="bold")
+        self._render()
+        self.bind("<Button-1>", self._click)
+        self.bind("<Enter>", self._enter)
+        self.bind("<Leave>", self._leave)
+
+    def set_locked(self, locked):
+        self._locked = bool(locked)
+        self._render()
+
+    def _click(self, event):
+        if self._command:
+            self._command()
+
+    def _enter(self, event):
+        self._hover = True
+        self._render()
+
+    def _leave(self, event):
+        self._hover = False
+        self._render()
+
+    def _render(self):
+        width = self._font.measure(self._text) + 16
+        height = 24
+        self.configure(width=width)
+        self.delete("all")
+        if self._locked:
+            _rounded_rect(
+                self, 1, 2, width - 1, height - 2, 6,
+                fill=TITLE_ACTIVE_BG_HOVER if self._hover
+                else TITLE_ACTIVE_BG,
+                outline=TITLE_ACTIVE_BORDER, width=1)
+            color = TITLE_ACCENT_HOVER if self._hover else TITLE_ACCENT
+        elif self._hover:
+            _rounded_rect(self, 1, 2, width - 1, height - 2, 6,
+                          fill="#333333", outline="#333333", width=1)
+            color = "#ffffff"
+        else:
+            color = "#e0e0e0"
+        self.create_text(width / 2, height / 2, text=self._text,
+                         fill=color, font=self._font)
+
+
+class _TranslateButton(tk.Canvas):
+    """Кнопка чата перевода: «⇄ язык», с общей скруглённой плашкой."""
+
+    def __init__(self, parent, command, bg="#1a1a1a"):
+        super().__init__(parent, width=44, height=24, bg=bg, bd=0,
+                         highlightthickness=0, cursor="hand2")
+        self._bg = bg
+        self._command = command
+        self._text = "⇄ en"
+        self._active = False
+        self._hover = False
+        self._font = tkfont.Font(family="Segoe UI", size=10,
+                                 weight="bold")
+        self._render()
+        self.bind("<Button-1>", self._click)
+        self.bind("<Enter>", self._enter)
+        self.bind("<Leave>", self._leave)
+
+    def set_lang(self, lang):
+        self._text = "⇄ %s" % lang
+        self._render()
+
+    def set_active(self, active):
+        self._active = bool(active)
+        self._render()
+
+    def _click(self, event):
+        if self._command:
+            self._command()
+
+    def _enter(self, event):
+        self._hover = True
+        self._render()
+
+    def _leave(self, event):
+        self._hover = False
+        self._render()
+
+    def _render(self):
+        width = self._font.measure(self._text) + 16
+        height = 24
+        self.configure(width=width)
+        self.delete("all")
+        if self._active:
+            _rounded_rect(
+                self, 1, 2, width - 1, height - 2, 6,
+                fill=TITLE_ACTIVE_BG_HOVER if self._hover
+                else TITLE_ACTIVE_BG,
+                outline=TITLE_ACTIVE_BORDER, width=1)
+            color = TITLE_ACCENT_HOVER if self._hover else TITLE_ACCENT
+        elif self._hover:
+            _rounded_rect(self, 1, 2, width - 1, height - 2, 6,
+                          fill="#333333", outline="#333333", width=1)
+            color = "#e0e0e0"
+        else:
+            color = "#c8c8c8"
+        self.create_text(width / 2, height / 2, text=self._text,
+                         fill=color, font=self._font)
+
+
+def _rounded_rect(canvas, x1, y1, x2, y2, radius, **kwargs):
+    points = (
+        x1 + radius, y1,
+        x2 - radius, y1,
+        x2, y1,
+        x2, y1 + radius,
+        x2, y2 - radius,
+        x2, y2,
+        x2 - radius, y2,
+        x1 + radius, y2,
+        x1, y2,
+        x1, y2 - radius,
+        x1, y1 + radius,
+        x1, y1,
+    )
+    return canvas.create_polygon(points, smooth=True, **kwargs)
+
+
 class EveTranslatorApp(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -945,6 +1111,7 @@ class EveTranslatorApp(ctk.CTk):
         self.bind("<ButtonPress-1>", self._on_mouse_press, add="+")
         self.bind("<B1-Motion>", self._on_mouse_drag, add="+")
         self.bind("<ButtonRelease-1>", self._on_mouse_release, add="+")
+        self.bind("<Configure>", self._on_window_configure, add="+")
 
         # Рекурсивная привязка событий к всем дочерним виджетам,
         # чтобы ресайз работал и при наведении на контент, вкладки и т.д.
@@ -1000,17 +1167,17 @@ class EveTranslatorApp(ctk.CTk):
             bar, "⚙", self._open_settings_menu, "#333333")
         self.settings_btn.pack(side="right", padx=(0, 2), pady=4)
 
-        # Замок — визуально понятный
-        tr = LANGS[self.lang_ui]
-        self.lock_btn = tk.Label(
-            bar, text=tr["lock"],
-            bg=LOCK_BG, fg=LOCK_FG,
-            font=("Segoe UI", 10, "bold"), cursor="hand2", padx=8, pady=1
-        )
-        self.lock_btn.pack(side="right", padx=(0, 4), pady=3)
-        self.lock_btn.bind("<Enter>", lambda e: self._lock_hover_on())
-        self.lock_btn.bind("<Leave>", lambda e: self._lock_hover_off())
-        self.lock_btn.bind("<ButtonRelease-1>", lambda e: self._toggle_lock())
+        # Кнопка переводчика: иконка + текущий язык панели.
+        self.translate_btn = _TranslateButton(
+            bar, self._toggle_composer, bg=self.TITLE_BG)
+        self.translate_btn.set_lang(
+            self.config["ui"].get("composer_lang", "en"))
+        self.translate_btn.pack(side="left", padx=(10, 4), pady=3)
+
+        # Фиксация окна: надпись «lock», в активном состоянии — оранжевая.
+        self.lock_btn = _LockButton(
+            bar, self._toggle_lock, bg=self.TITLE_BG)
+        self.lock_btn.pack(side="left", padx=(0, 4), pady=3)
 
         for w in (bar, self.title_label):
             w.bind("<ButtonPress-1>", self._start_drag)
@@ -1023,25 +1190,40 @@ class EveTranslatorApp(ctk.CTk):
 
         self._title_bar = bar
 
-    def _lock_hover_on(self):
-        self.lock_btn.configure(
-            bg=LOCK_HOVER_LOCKED if self._is_locked else LOCK_BG_HOVER)
+    # ---------- кнопка переводчика / замок ----------
+    def _composer_open(self):
+        composer = getattr(self, "composer", None)
+        return bool(composer is not None and composer.expanded)
 
-    def _lock_hover_off(self):
-        """Возвращает фон замка к состоянию «открыто/закрыто»."""
-        self.lock_btn.configure(
-            bg=LOCK_BG_LOCKED if self._is_locked else LOCK_BG)
+    def _update_translate_btn(self, expanded=None):
+        btn = getattr(self, "translate_btn", None)
+        if btn is None:
+            return
+        if expanded is None:
+            expanded = self._composer_open()
+        composer = getattr(self, "composer", None)
+        lang = composer.lang if composer is not None else \
+            self.config["ui"].get("composer_lang", "en")
+        btn.set_lang(lang)
+        btn.set_active(expanded)
+
+    def _toggle_composer(self):
+        composer = getattr(self, "composer", None)
+        if composer is None:
+            return
+        if self._collapsed:
+            # Окно свёрнуто до полоски: сначала возвращаем высоту.
+            self._toggle_collapse()
+            if not composer.expanded:
+                composer.set_expanded(True)
+            return
+        composer.toggle()
 
     def _toggle_lock(self):
         self._is_locked = not self._is_locked
-        tr = LANGS[self.lang_ui]
+        self.lock_btn.set_locked(self._is_locked)
         if self._is_locked:
-            self.lock_btn.configure(text=tr["unlock"], bg=LOCK_BG_LOCKED,
-                                    fg=LOCK_FG_LOCKED)
             self.configure(cursor="arrow")
-        else:
-            self.lock_btn.configure(text=tr["lock"], bg=LOCK_BG,
-                                    fg=LOCK_FG)
 
     def _start_drag(self, event):
         # Клик по логотипу (сворачивание/разворачивание) работает и при
@@ -1079,6 +1261,12 @@ class EveTranslatorApp(ctk.CTk):
 
     def _toggle_collapse(self):
         """Свернуть окно до одной верхней панели и вернуть обратно."""
+        composer = getattr(self, "composer", None)
+        if composer is not None:
+            try:
+                composer.close_transient()
+            except Exception:
+                pass
         width = self.winfo_width()
         x, y = self.winfo_x(), self.winfo_y()
         if self._collapsed:
@@ -1368,6 +1556,13 @@ class EveTranslatorApp(ctk.CTk):
 
     def _on_check_updates_changed(self):
         self.config["ui"]["check_updates"] = bool(self.check_updates_var.get())
+        save_config(self.config)
+
+    def _on_composer_autocopy_changed(self):
+        value = bool(self.composer_copy_var.get())
+        self.config["ui"]["composer_autocopy"] = value
+        if getattr(self, "composer", None) is not None:
+            self.composer.autocopy = value
         save_config(self.config)
 
     # ---------- Индикатор состояния движка ----------
@@ -1903,6 +2098,22 @@ class EveTranslatorApp(ctk.CTk):
         )
         self.tab_bar.pack(fill="x", padx=0, pady=(0, 0))
 
+        # Панель исходящего перевода. В свёрнутом виде не занимает места:
+        # остаётся только плавающая кнопка поверх чата. При раскрытии
+        # пакуется снизу на две трети высоты окна.
+        self.chat_font = ctk.CTkFont(family="Consolas", size=self.font_size)
+        self.composer = Composer(
+            self,
+            tr_provider=lambda: LANGS[self.lang_ui],
+            on_translate=self._request_outgoing,
+            on_lang_change=self._on_composer_lang,
+            on_expanded=self._on_composer_expanded,
+            lang=self.config["ui"].get("composer_lang", "en"),
+            autocopy=bool(self.config["ui"].get("composer_autocopy", True)),
+            translation_color=self.color_trans,
+            font=self.chat_font,
+        )
+
         # Content frame fills everything below the title bar and tab bar.
         # pack(fill="both", expand=True) сам растягивает его до низа окна,
         # без ручного позиционирования и без выезда за границы.
@@ -1922,6 +2133,9 @@ class EveTranslatorApp(ctk.CTk):
         # дополнительный обработчик на окне только дублировал пересчёт.
 
         self._current_tab = None
+        # Шрифт панели подтягиваем, когда вкладки уже созданы.
+        self._update_translate_btn(False)
+        self.after_idle(self._sync_composer_font)
 
     def _show_empty_hint(self):
         hint = getattr(self, "empty_hint", None)
@@ -1946,6 +2160,46 @@ class EveTranslatorApp(ctk.CTk):
                 hint.place_forget()
             except Exception:
                 pass
+
+    # ---------- Панель исходящего перевода ----------
+    def _request_outgoing(self, text, lang, callback):
+        """Перевод исходящего текста в фоне, ответ — в главный поток."""
+
+        def worker():
+            try:
+                result = self.engine.translate_outgoing(text, lang)
+                self._post_ui(callback, result, None)
+            except Exception as exc:
+                app_log.log(f"outgoing: {exc!r}")
+                self._post_ui(callback, None, str(exc))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_composer_lang(self, code):
+        self.config["ui"]["composer_lang"] = code
+        save_config(self.config)
+        self._update_translate_btn()
+
+    def _on_composer_expanded(self, expanded):
+        """Показывает панель снизу на 2/3 окна или отдаёт место чату."""
+        composer = getattr(self, "composer", None)
+        content = getattr(self, "content_frame", None)
+        if composer is None or content is None:
+            return
+        if expanded:
+            composer.update_height(self.winfo_height())
+            composer.pack(side="bottom", fill="x", before=content)
+            self.update_idletasks()
+        else:
+            composer.pack_forget()
+        self._update_translate_btn(expanded)
+
+    def _on_window_configure(self, event):
+        if event.widget is not self:
+            return
+        composer = getattr(self, "composer", None)
+        if composer is not None:
+            composer.update_height(event.height)
 
     def _on_tab_selected(self, name):
         for n, tb in self.textboxes.items():
@@ -1983,17 +2237,26 @@ class EveTranslatorApp(ctk.CTk):
         self._reapply_tags(textbox)
         textbox.configure(state="disabled")
         
-        # Биндим Ctrl+C для копирования из неактивного чата
+        # Биндим Ctrl+C для копирования из неактивного чата. Нажатие
+        # приходит во внутренний tk.Text, поэтому биндим и на него.
         textbox.bind("<Control-c>", lambda e, t=textbox: self._copy_text_from_textbox(t))
         textbox.bind("<Control-C>", lambda e, t=textbox: self._copy_text_from_textbox(t))
-        
-        # Привязка событий ресайза ко всему поддереву текстбокса (включая
-        # полосу прокрутки), чтобы за нижний край можно было ухватиться,
-        # даже когда мышь над контентом чата
+        inner_text = getattr(textbox, "_textbox", None)
+        if inner_text is not None:
+            inner_text.bind("<Control-c>", lambda e, t=textbox: self._copy_text_from_textbox(t))
+            inner_text.bind("<Control-C>", lambda e, t=textbox: self._copy_text_from_textbox(t))
+            # Ctrl+C по коду клавиши — срабатывает и на русской раскладке.
+            inner_text.bind(
+                "<Control-KeyPress>",
+                lambda e, t=textbox: self._copy_on_ctrl(e, t))
+        textbox.bind(
+            "<Control-KeyPress>",
+            lambda e, t=textbox: self._copy_on_ctrl(e, t))
         self._bind_events_recursive(textbox)
         
         self.textboxes[channel_name] = textbox
         self.tab_names.add(channel_name)
+        self._sync_composer_font()
         if self._current_tab and self._current_tab != channel_name:
             textbox.pack_forget()
         return textbox
@@ -2007,6 +2270,27 @@ class EveTranslatorApp(ctk.CTk):
         except Exception:
             pass 
         return "break"
+
+    def _copy_on_ctrl(self, event, textbox):
+        """Ctrl+C независимо от раскладки (VK_C = 67)."""
+        if getattr(event, "keycode", 0) == 67:
+            return self._copy_text_from_textbox(textbox)
+        return None
+
+    def _sync_composer_font(self):
+        """Берёт фактический шрифт чата (пиксельный) и отдаёт панели."""
+        composer = getattr(self, "composer", None)
+        if composer is None:
+            return
+        spec = None
+        for tb in self.textboxes.values():
+            inner = getattr(tb, "_textbox", None)
+            if inner is not None:
+                spec = inner.cget("font")
+                break
+        if not spec:
+            spec = ("Consolas", self.font_size)
+        composer.set_font(spec)
 
     def _remove_tab(self, channel_name):
         if channel_name not in self.tab_names:
@@ -2168,29 +2452,36 @@ class EveTranslatorApp(ctk.CTk):
         _classic_check(
             c, tr["update_setting"], self.check_updates_var,
             self._on_check_updates_changed
-        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 6))
+
+        self.composer_copy_var = tk.BooleanVar(
+            value=bool(self.config["ui"].get("composer_autocopy", True)))
+        _classic_check(
+            c, tr["composer_autocopy"], self.composer_copy_var,
+            self._on_composer_autocopy_changed
+        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 8))
 
         _classic_label(c, tr["lang_ui"]).grid(
-            row=2, column=0, sticky="w", padx=(0, 12), pady=3)
+            row=3, column=0, sticky="w", padx=(0, 12), pady=3)
         self.ui_lang_var = tk.StringVar(
             value=LANG_LABELS.get(self.lang_ui, LANG_LABELS["ru"]))
         _classic_option(c, self.ui_lang_var, labels,
                         self._on_ui_lang_changed, width=18).grid(
-            row=2, column=1, sticky="w", pady=3)
+            row=3, column=1, sticky="w", pady=3)
 
         _classic_label(c, tr["font"]).grid(
-            row=3, column=0, sticky="w", padx=(0, 12), pady=3)
+            row=4, column=0, sticky="w", padx=(0, 12), pady=3)
         self.font_var = tk.StringVar(value=str(self.font_size))
         _classic_option(
             c, self.font_var,
             ["10", "11", "12", "13", "14", "16", "18", "20"],
             self._on_font_size_changed, width=8
-        ).grid(row=3, column=1, sticky="w", pady=3)
+        ).grid(row=4, column=1, sticky="w", pady=3)
 
         _classic_label(c, tr["alpha"]).grid(
-            row=4, column=0, sticky="w", padx=(0, 12), pady=3)
+            row=5, column=0, sticky="w", padx=(0, 12), pady=3)
         alpha_box = tk.Frame(c, bg=CLASSIC_BG)
-        alpha_box.grid(row=4, column=1, sticky="ew", pady=3)
+        alpha_box.grid(row=5, column=1, sticky="ew", pady=3)
         self.alpha_label = tk.Label(
             alpha_box,
             text=f"{int(float(self.config['window']['alpha']) * 100)}%",
@@ -2213,16 +2504,16 @@ class EveTranslatorApp(ctk.CTk):
         color_labels = [self._color_label(cid) for cid in COLOR_IDS]
 
         _classic_label(c, tr["color_orig"]).grid(
-            row=5, column=0, sticky="w", padx=(0, 12), pady=3)
+            row=6, column=0, sticky="w", padx=(0, 12), pady=3)
         self.color_orig_var = tk.StringVar(
             value=self._color_label(self._get_color_id(self.color_orig)))
         _classic_option(
             c, self.color_orig_var, color_labels,
             self._on_color_orig_changed, width=16
-        ).grid(row=5, column=1, sticky="w", pady=3)
+        ).grid(row=6, column=1, sticky="w", pady=3)
 
         _classic_label(c, tr["color_trans"]).grid(
-            row=6, column=0, sticky="w", padx=(0, 12), pady=3)
+            row=7, column=0, sticky="w", padx=(0, 12), pady=3)
         self.color_trans_var = tk.StringVar(
             value=self._color_label(self._get_color_id(self.color_trans)))
         _classic_option(
@@ -2649,6 +2940,24 @@ class EveTranslatorApp(ctk.CTk):
         widget.bind("<Control-a>", lambda e: self._select_all_prompt())
         widget.bind("<Control-A>", lambda e: self._select_all_prompt())
 
+        # Те же действия по коду клавиши: работает на любой раскладке.
+        def on_ctrl(event):
+            code = getattr(event, "keycode", 0)
+            if code == 67:
+                widget.event_generate("<<Copy>>")
+                return "break"
+            if code == 86:
+                widget.event_generate("<<Paste>>")
+                return "break"
+            if code == 88:
+                widget.event_generate("<<Cut>>")
+                return "break"
+            if code == 65:
+                return self._select_all_prompt()
+            return None
+
+        widget.bind("<Control-KeyPress>", on_ctrl)
+
     def _select_all_prompt(self):
         self.prompt_textbox.tag_add("sel", "1.0", "end-1c")
         return "break"
@@ -2739,6 +3048,8 @@ class EveTranslatorApp(ctk.CTk):
         for tb in self.textboxes.values():
             tb.configure(font=("Consolas", self.font_size))
             self._reapply_tags(tb)
+        if getattr(self, "composer", None) is not None:
+            self._sync_composer_font()
 
     def _on_color_orig_changed(self, label):
         color_id = self._color_id_from_label(label)
@@ -2757,6 +3068,8 @@ class EveTranslatorApp(ctk.CTk):
         self.config["ui"]["color_translated"] = self.color_trans
         for tb in self.textboxes.values():
             self._reapply_tags(tb)
+        if getattr(self, "composer", None) is not None:
+            self.composer.set_translation_color(self.color_trans)
 
     def _reapply_tags(self, tb):
         tb.tag_config("original", foreground=self.color_orig)
@@ -2821,23 +3134,26 @@ class EveTranslatorApp(ctk.CTk):
 
         header = msg_data.get("header", "")
         orig_text = msg_data.get("original", "")
-        trans_text = msg_data.get("translation", "")
+        trans_text = msg_data.get("translation", "").rstrip()
+
+        # Пустая строка между сообщениями — сверху, а не после последнего:
+        # так низ окна не «съедает» пустая строка.
+        if textbox.index("end-1c") != "1.0":
+            textbox.insert("end", "\n\n", "original")
 
         textbox.insert("end", header + "\n", "sender")
 
         if not trans_text or msg_type == "original":
             self._insert_highlighted_text(textbox, orig_text, "original")
-            textbox.insert("end", "\n\n", "original")
         else:
             if not self.hide_original and orig_text:
                 self._insert_highlighted_text(textbox, orig_text, "original")
                 textbox.insert("end", "\n", "original")
 
             self._insert_highlighted_text(textbox, trans_text, "translated")
-            textbox.insert("end", "\n\n", "translated")
 
         if is_at_bottom:
-            textbox.see("end")
+            textbox.see("end-1c")
             
         try:
             if int(textbox.index("end-1c").split(".")[0]) > 500:

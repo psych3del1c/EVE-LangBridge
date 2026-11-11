@@ -18,6 +18,7 @@
 - Читать любой чат — Local, корпоративный, альянсовый, помощь — не выходя из игры.
 - Работает с несколькими окнами игры: сообщение, пришедшее во все, показывается один раз.
 - Названия кораблей, модулей и систем остаются такими, как в игре.
+- Отвечать иностранцам: панель внизу окна переводит вашу фразу и копирует её в буфер — остаётся вставить в чат.
 - Свои слова: сленг можно оставить как есть или заменить на понятный перевод.
 
 ### Установка
@@ -57,6 +58,7 @@ and your chat stays private.
 - Read any chat — local, corp, alliance, help — without leaving the game.
 - Works with several game clients; a message received by all of them is shown once.
 - Ship, module and system names stay exactly as they are in the game.
+- Reply to foreign players: the panel at the bottom translates your message and copies it to the clipboard, ready to paste.
 - Add your own words: keep slang as is, or replace it with a clear translation.
 
 ### Installation
@@ -94,6 +96,7 @@ ker Egivand and Arnold Olympus for the Sognare corporation.
 - 不用离开游戏就能看懂任何聊天：本地、军团、联盟、帮助频道。
 - 支持多个游戏客户端：同一条消息在多个窗口收到时只显示一次。
 - 舰船、装备和星系名称保持游戏中的写法。
+- 回复外国玩家：窗口底部的面板会把您的话翻译好并复制到剪贴板，直接粘贴即可。
 - 可以添加自己的词：俚语可保持原样，也可替换为易懂的翻译。
 
 ### 安装
