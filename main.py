@@ -2473,41 +2473,34 @@ class EveTranslatorApp(ctk.CTk):
             self._on_hide_original_changed
         ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
 
-        self.check_updates_var = tk.BooleanVar(
-            value=bool(self.config["ui"].get("check_updates", True)))
-        _classic_check(
-            c, tr["update_setting"], self.check_updates_var,
-            self._on_check_updates_changed
-        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 6))
-
         self.composer_copy_var = tk.BooleanVar(
             value=bool(self.config["ui"].get("composer_autocopy", True)))
         _classic_check(
             c, tr["composer_autocopy"], self.composer_copy_var,
             self._on_composer_autocopy_changed
-        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 8))
 
         _classic_label(c, tr["lang_ui"]).grid(
-            row=3, column=0, sticky="w", padx=(0, 12), pady=3)
+            row=2, column=0, sticky="w", padx=(0, 12), pady=3)
         self.ui_lang_var = tk.StringVar(
             value=LANG_LABELS.get(self.lang_ui, LANG_LABELS["ru"]))
         _classic_option(c, self.ui_lang_var, labels,
                         self._on_ui_lang_changed, width=18).grid(
-            row=3, column=1, sticky="w", pady=3)
+            row=2, column=1, sticky="w", pady=3)
 
         _classic_label(c, tr["font"]).grid(
-            row=4, column=0, sticky="w", padx=(0, 12), pady=3)
+            row=3, column=0, sticky="w", padx=(0, 12), pady=3)
         self.font_var = tk.StringVar(value=str(self.font_size))
         _classic_option(
             c, self.font_var,
             ["10", "11", "12", "13", "14", "16", "18", "20"],
             self._on_font_size_changed, width=8
-        ).grid(row=4, column=1, sticky="w", pady=3)
+        ).grid(row=3, column=1, sticky="w", pady=3)
 
         _classic_label(c, tr["alpha"]).grid(
-            row=5, column=0, sticky="w", padx=(0, 12), pady=3)
+            row=4, column=0, sticky="w", padx=(0, 12), pady=3)
         alpha_box = tk.Frame(c, bg=CLASSIC_BG)
-        alpha_box.grid(row=5, column=1, sticky="ew", pady=3)
+        alpha_box.grid(row=4, column=1, sticky="ew", pady=3)
         self.alpha_label = tk.Label(
             alpha_box,
             text=f"{int(float(self.config['window']['alpha']) * 100)}%",
@@ -2530,16 +2523,16 @@ class EveTranslatorApp(ctk.CTk):
         color_labels = [self._color_label(cid) for cid in COLOR_IDS]
 
         _classic_label(c, tr["color_orig"]).grid(
-            row=6, column=0, sticky="w", padx=(0, 12), pady=3)
+            row=5, column=0, sticky="w", padx=(0, 12), pady=3)
         self.color_orig_var = tk.StringVar(
             value=self._color_label(self._get_color_id(self.color_orig)))
         _classic_option(
             c, self.color_orig_var, color_labels,
             self._on_color_orig_changed, width=16
-        ).grid(row=6, column=1, sticky="w", pady=3)
+        ).grid(row=5, column=1, sticky="w", pady=3)
 
         _classic_label(c, tr["color_trans"]).grid(
-            row=7, column=0, sticky="w", padx=(0, 12), pady=3)
+            row=6, column=0, sticky="w", padx=(0, 12), pady=3)
         self.color_trans_var = tk.StringVar(
             value=self._color_label(self._get_color_id(self.color_trans)))
         _classic_option(
@@ -2964,17 +2957,25 @@ class EveTranslatorApp(ctk.CTk):
                      justify="left", wraplength=320).grid(
                 row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
+            self.check_updates_var = tk.BooleanVar(
+                value=bool(self.config["ui"].get("check_updates", True)))
+            _classic_check(
+                c, tr["update_setting"], self.check_updates_var,
+                self._on_check_updates_changed
+            ).grid(row=5, column=0, columnspan=2, sticky="w",
+                   pady=(14, 0))
+
             self._update_status_var = tk.StringVar(
                 value=self._update_status_text())
             status_row = tk.Frame(c, bg=CLASSIC_BG)
-            status_row.grid(row=5, column=0, columnspan=2, sticky="w",
-                            pady=(14, 0))
+            status_row.grid(row=6, column=0, columnspan=2, sticky="w",
+                            pady=(10, 0))
             tk.Label(status_row, textvariable=self._update_status_var,
                      bg=CLASSIC_BG, fg=CLASSIC_TEXT,
                      font=CLASSIC_FONT).pack(side="left")
 
             update_row = tk.Frame(c, bg=CLASSIC_BG)
-            update_row.grid(row=6, column=0, columnspan=2, sticky="w",
+            update_row.grid(row=7, column=0, columnspan=2, sticky="w",
                             pady=(6, 0))
             _classic_button(update_row, tr["update_download"],
                             self._open_update_page).pack(side="left")
