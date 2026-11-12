@@ -135,6 +135,12 @@ class SetupWizard(tk.Toplevel):
         self.resizable(False, False)
         self.attributes("-topmost", True)
         self.transient(master)
+        try:
+            from app_icon import make_tk_icon
+            self._app_icon = make_tk_icon(32)
+            self.iconphoto(True, self._app_icon)
+        except Exception:
+            pass
         self.protocol("WM_DELETE_WINDOW", self._close)
 
         self.body = tk.Frame(self, bg=CLASSIC_BG, padx=16, pady=14)

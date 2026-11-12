@@ -15,7 +15,7 @@ import slang as slang_mod
 import system_info
 import updater
 import app_log
-from core import TranslatorEngine
+from core import TranslatorEngine, DEFAULT_OUTGOING_PROMPT
 from wizard import SetupWizard
 from providers import create_backend, resolve_model, store_backend_config
 from version import VERSION
@@ -116,6 +116,8 @@ LANGS = {
         "model_label": "Модель перевода:",
         "hide_orig": "Скрыть оригинал (оставить только перевод)",
         "prompt_label": "Промпт для нейросети:",
+        "prompt_in_label": "Для входящих сообщений:",
+        "prompt_out_label": "Для исходящих сообщений (живой чат):",
         "save_prompt": "Сохранить промпт",
         "close_tab": "Закрыть вкладку",
         "clear_chats": "Очистить список чатов",
@@ -202,6 +204,8 @@ LANGS = {
         "model_label": "Translation model:",
         "hide_orig": "Hide original text (show only translation)",
         "prompt_label": "System Prompt:",
+        "prompt_in_label": "Incoming messages:",
+        "prompt_out_label": "Outgoing messages (casual chat):",
         "save_prompt": "Save prompt",
         "close_tab": "Close tab",
         "clear_chats": "Clear chat list",
@@ -288,6 +292,8 @@ LANGS = {
         "model_label": "翻译模型:",
         "hide_orig": "隐藏原文（仅显示翻译）",
         "prompt_label": "系统提示词:",
+        "prompt_in_label": "接收消息:",
+        "prompt_out_label": "发送消息（游戏聊天风格）:",
         "save_prompt": "保存提示词",
         "close_tab": "关闭标签页",
         "clear_chats": "清空聊天列表",
@@ -443,6 +449,8 @@ DEFAULT_CONFIG = {
         "replay_history": True,
         "composer_lang": "en",
         "composer_autocopy": True,
+        "composer_split": 0.6667,
+        "composer_input_height": 42,
         "hide_original": False
     },
     "chats": {"all": [], "active": [], "current": None},
@@ -457,6 +465,7 @@ DEFAULT_CONFIG = {
             "Translate the text into natural, fluent {target_lang}. Focus on "
             "conveying the meaning and context. Output ONLY the translation."
         ),
+        "outgoing_prompt": DEFAULT_OUTGOING_PROMPT,
         "lmstudio": {
             "base_url": "http://localhost:1234/v1",
             "api_key": "lm-studio",
@@ -1070,6 +1079,8 @@ class EveTranslatorApp(ctk.CTk):
         engine_cfg = self.config["engine"]
         llm_cfg = self.config["llm"]
         self.system_prompt = llm_cfg.get("system_prompt", "")
+        self.outgoing_prompt = (llm_cfg.get("outgoing_prompt")
+                                or DEFAULT_OUTGOING_PROMPT)
         self.log_dir = paths.find_chatlogs(engine_cfg["log_dir"])
         app_log.log(f"app: log_dir raw={engine_cfg['log_dir']!r} "
                     f"resolved={self.log_dir!r} "
@@ -1093,6 +1104,7 @@ class EveTranslatorApp(ctk.CTk):
             poll_interval=engine_cfg["poll_interval"],
             target_lang=self.lang_target,
             system_prompt=self.system_prompt,
+            outgoing_prompt=self.outgoing_prompt,
             terms_lang=self.terms_lang,
         )
         self.engine.start()
@@ -2108,8 +2120,11 @@ class EveTranslatorApp(ctk.CTk):
             on_translate=self._request_outgoing,
             on_lang_change=self._on_composer_lang,
             on_expanded=self._on_composer_expanded,
+            on_geometry_change=self._on_composer_geometry,
             lang=self.config["ui"].get("composer_lang", "en"),
             autocopy=bool(self.config["ui"].get("composer_autocopy", True)),
+            split=self.config["ui"].get("composer_split", 0.6667),
+            input_height=self.config["ui"].get("composer_input_height", 42),
             translation_color=self.color_trans,
             font=self.chat_font,
         )
@@ -2136,6 +2151,11 @@ class EveTranslatorApp(ctk.CTk):
         # Шрифт панели подтягиваем, когда вкладки уже созданы.
         self._update_translate_btn(False)
         self.after_idle(self._sync_composer_font)
+        try:
+            self._app_icon = _make_app_icon(64)
+            self.iconphoto(True, self._app_icon)
+        except Exception:
+            pass
 
     def _show_empty_hint(self):
         hint = getattr(self, "empty_hint", None)
@@ -2179,6 +2199,12 @@ class EveTranslatorApp(ctk.CTk):
         self.config["ui"]["composer_lang"] = code
         save_config(self.config)
         self._update_translate_btn()
+
+    def _on_composer_geometry(self, split, input_height):
+        """Запоминаем высоту панели и поля ввода после перетаскивания."""
+        self.config["ui"]["composer_split"] = round(float(split), 4)
+        self.config["ui"]["composer_input_height"] = int(input_height)
+        save_config(self.config)
 
     def _on_composer_expanded(self, expanded):
         """Показывает панель снизу на 2/3 окна или отдаёт место чату."""
@@ -2642,6 +2668,12 @@ class EveTranslatorApp(ctk.CTk):
         dialog.resizable(False, False)
         dialog.attributes("-topmost", True)
         dialog.transient(parent)
+        try:
+            dialog_icon = _make_app_icon(32)
+            dialog.iconphoto(True, dialog_icon)
+            dialog._app_icon = dialog_icon
+        except Exception:
+            pass
 
         body = tk.Frame(dialog, bg=CLASSIC_BG, padx=14, pady=12)
         body.pack(fill="both", expand=True)
@@ -2810,15 +2842,17 @@ class EveTranslatorApp(ctk.CTk):
             self._build_dictionary_page(c)
         elif page == "prompt":
             _classic_label(c, tr["prompt_label"], bold=True).grid(
-                row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
-            c.grid_rowconfigure(1, weight=1)
+                row=0, column=0, columnspan=2, sticky="w", pady=(0, 4))
+            _classic_label(c, tr["prompt_in_label"]).grid(
+                row=1, column=0, columnspan=2, sticky="w", pady=(0, 2))
 
-            text_frame = tk.Frame(c, bg=CLASSIC_BG, relief="sunken", bd=1)
-            text_frame.grid(row=1, column=0, columnspan=2,
-                            sticky="nsew", pady=(0, 8))
+            in_frame = tk.Frame(c, bg=CLASSIC_BG, relief="sunken", bd=1)
+            in_frame.grid(row=2, column=0, columnspan=2,
+                          sticky="nsew", pady=(0, 6))
+            c.grid_rowconfigure(2, weight=1)
 
             self.prompt_textbox = tk.Text(
-                text_frame, width=1, height=11, wrap="word",
+                in_frame, width=1, height=6, wrap="word",
                 font=("Consolas", 9),
                 bg="#ffffff", fg=CLASSIC_TEXT, insertbackground=CLASSIC_TEXT,
                 relief="flat", bd=0, highlightthickness=0
@@ -2827,8 +2861,26 @@ class EveTranslatorApp(ctk.CTk):
             self.prompt_textbox.insert("1.0", self.system_prompt)
             self._bind_text_shortcuts(self.prompt_textbox)
 
+            _classic_label(c, tr["prompt_out_label"]).grid(
+                row=3, column=0, columnspan=2, sticky="w", pady=(0, 2))
+
+            out_frame = tk.Frame(c, bg=CLASSIC_BG, relief="sunken", bd=1)
+            out_frame.grid(row=4, column=0, columnspan=2,
+                           sticky="nsew", pady=(0, 8))
+            c.grid_rowconfigure(4, weight=1)
+
+            self.outgoing_prompt_textbox = tk.Text(
+                out_frame, width=1, height=6, wrap="word",
+                font=("Consolas", 9),
+                bg="#ffffff", fg=CLASSIC_TEXT, insertbackground=CLASSIC_TEXT,
+                relief="flat", bd=0, highlightthickness=0
+            )
+            self.outgoing_prompt_textbox.pack(fill="both", expand=True)
+            self.outgoing_prompt_textbox.insert(1.0, self.outgoing_prompt)
+            self._bind_text_shortcuts(self.outgoing_prompt_textbox)
+
             _classic_button(c, tr["save_prompt"], self._save_prompt).grid(
-                row=2, column=0, columnspan=2, sticky="e")
+                row=5, column=0, columnspan=2, sticky="e")
 
         elif page == "chats":
             log_exists = os.path.isdir(self.log_dir)
@@ -2972,8 +3024,13 @@ class EveTranslatorApp(ctk.CTk):
 
     def _save_prompt(self):
         self.system_prompt = self.prompt_textbox.get("1.0", "end-1c").strip()
+        outgoing = self.outgoing_prompt_textbox.get(
+            "1.0", "end-1c").strip()
+        self.outgoing_prompt = outgoing or DEFAULT_OUTGOING_PROMPT
         self.config["llm"]["system_prompt"] = self.system_prompt
+        self.config["llm"]["outgoing_prompt"] = self.outgoing_prompt
         self.engine.system_prompt = self.system_prompt
+        self.engine.outgoing_prompt = self.outgoing_prompt
         self.engine.clear_cache()
         save_config(self.config)
         self._open_settings_menu()

@@ -33,6 +33,14 @@ import paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TERMS_FILE = paths.resource_path("eve_terms.json")
 
+# Промпт для исходящих сообщений по умолчанию: живой игровой чат, без
+# «шекспировской» официальности. Меняется в настройках.
+DEFAULT_OUTGOING_PROMPT = (
+    "Translate this EVE Online chat message into natural, colloquial "
+    "{target_lang}. Keep it short and casual, like players talk. "
+    "Avoid formal or literary wording. Output only the translation."
+)
+
 
 # ==================== Определение письменности ====================
 def _char_script(ch):
@@ -348,6 +356,7 @@ class TranslatorEngine:
         poll_interval=1.0,
         target_lang="ru",
         system_prompt="",
+        outgoing_prompt=None,
         terms_lang="en"
     ):
         self.ui_callback = ui_callback
@@ -361,6 +370,7 @@ class TranslatorEngine:
             f"You are a translator. Translate the text to {{target_lang}}. "
             f"Output ONLY the translation, without any comments."
         )
+        self.outgoing_prompt = outgoing_prompt or DEFAULT_OUTGOING_PROMPT
 
         self.running = True
 
@@ -737,7 +747,8 @@ class TranslatorEngine:
             return ""
         lang_name = {"ru": "Russian", "en": "English",
                      "zh": "Chinese"}.get(target_lang, "English")
-        prompt = self.system_prompt.replace("{target_lang}", lang_name)
+        prompt = (self.outgoing_prompt or DEFAULT_OUTGOING_PROMPT).replace(
+            "{target_lang}", lang_name)
         try:
             answer = self.backend.chat(
                 [{"role": "system", "content": prompt},

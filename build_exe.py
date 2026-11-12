@@ -58,8 +58,13 @@ def build_exe():
         "--icon", icon,
         "--collect-all", "customtkinter",
         "--hidden-import", "pystray._win32",
-        "--add-data", os.path.join(ROOT, "eve_terms.json") + ";.",
+        "--hidden-import", "PIL.ImageTk",
+        "--hidden-import", "PIL._tkinter_finder",        "--add-data", os.path.join(ROOT, "eve_terms.json") + ";.",
         "--add-data", os.path.join(ROOT, "slang.json") + ";.",
+        "--add-data", os.path.join(ROOT, "icons", "logo-100.png") + ";icons",
+        "--add-data", os.path.join(ROOT, "icons", "logo-64.png") + ";icons",
+        "--add-data", os.path.join(ROOT, "icons", "logo-32.png") + ";icons",
+        "--add-data", os.path.join(ROOT, "icons", "logo-16.png") + ";icons",
         os.path.join(ROOT, "main.py"),
     ]
     result = subprocess.run(command, cwd=ROOT)

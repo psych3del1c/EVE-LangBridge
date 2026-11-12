@@ -1,18 +1,23 @@
 """Экран исходящего перевода.
 
-Открывается кнопкой в заголовке окна. Когда раскрыт — занимает две трети
-высоты окна: сверху тонкий разделитель, история переводов, снизу строка
-ввода со скруглённым полем.
+Открывается кнопкой в заголовке окна. Занимает настраиваемую долю высоты
+окна (по умолчанию 2/3): сверху ручка-разделитель, история переводов,
+снизу ручка и многострочное поле ввода со скруглёнными углами.
 """
 
-import math
 import time
 import tkinter as tk
 
 MIN_PANEL_HEIGHT = 150
+MIN_CHAT_HEIGHT = 60
+MIN_INPUT_HEIGHT = 42
+MAX_INPUT_HEIGHT = 260
+MIN_HISTORY_HEIGHT = 110
+DIVIDER_GRIP_HEIGHT = 12
+INPUT_GRIP_HEIGHT = 10
 DIVIDER_HEIGHT = 2
-INPUT_HEIGHT = 42
-INPUT_RADIUS = 10
+DEFAULT_SPLIT = 2 / 3
+DEFAULT_INPUT_HEIGHT = 42
 
 BG = "#141414"
 TEXT_BG = "#0d0d0d"
@@ -32,10 +37,12 @@ _PLANE = ((1.0, 0.0), (-0.8, -0.8), (-0.42, 0.0), (-0.8, 0.8))
 
 
 class Composer(tk.Frame):
-    """История исходящих переводов и строка ввода."""
+    """История исходящих переводов и многострочная строка ввода."""
 
     def __init__(self, master, tr_provider, on_translate, on_lang_change=None,
-                 on_expanded=None, lang="en", autocopy=True,
+                 on_expanded=None, on_geometry_change=None, lang="en",
+                 autocopy=True, split=DEFAULT_SPLIT,
+                 input_height=DEFAULT_INPUT_HEIGHT,
                  translation_color="#00ff7f", font=None, font_size=12):
         super().__init__(master, bg=BG)
         self.pack_propagate(False)
@@ -43,6 +50,7 @@ class Composer(tk.Frame):
         self._on_translate = on_translate
         self._on_lang_change = on_lang_change
         self._on_expanded = on_expanded
+        self._on_geometry_change = on_geometry_change
         # Шрифт берём тот же, что в основном чате (пиксельный размер CTk).
         self._font = font if font is not None else ("Consolas", font_size)
         self.autocopy = bool(autocopy)
@@ -53,10 +61,24 @@ class Composer(tk.Frame):
         self._pending_text = ""
         self._status_job = None
         self._panel_height = 0
+        self._split = self._clamp_split(split)
+        self._input_height = self._clamp_input(input_height)
         self._lang_popup = None
+        self._drag_kind = None
+        self._drag_y = 0
+        self._drag_h = 0
+        self._grip_widget = None
 
-        # ---------- разделитель ----------
-        self._divider = tk.Frame(self, bg=FIELD_BORDER, height=DIVIDER_HEIGHT)
+        # ---------- верхняя ручка + разделитель ----------
+        self._divider = tk.Frame(
+            self, bg=BG, height=DIVIDER_GRIP_HEIGHT,
+            cursor="sb_v_double_arrow")
+        self._divider_line = tk.Frame(
+            self._divider, bg=FIELD_BORDER, height=DIVIDER_HEIGHT,
+            cursor="sb_v_double_arrow")
+        self._divider_line.pack(side="top", fill="x")
+        self._bind_drag(self._divider, "composer")
+        self._bind_drag(self._divider_line, "composer")
 
         # ---------- история ----------
         self._history = tk.Text(
@@ -76,10 +98,17 @@ class Composer(tk.Frame):
             self._history, text="", bg="#181818", fg=ACCENT,
             font=("Segoe UI", 8), padx=6, pady=2)
 
+        # ---------- ручка высоты поля ввода ----------
+        self._input_grip = tk.Frame(
+            self, height=INPUT_GRIP_HEIGHT, bg=BG,
+            cursor="sb_v_double_arrow")
+        self._bind_drag(self._input_grip, "input")
+
         # ---------- строка ввода (скруглённое поле на Canvas) ----------
         self._input_wrap = tk.Canvas(
-            self, bg=BG, height=INPUT_HEIGHT, bd=0,
+            self, bg=BG, height=self._input_height, bd=0,
             highlightthickness=0)
+        self._input_wrap.pack_propagate(False)
         self._input_wrap.bind("<Configure>", self._draw_input_bg)
         self._input_wrap.bind("<Button-1>", self._focus_entry)
 
@@ -87,10 +116,12 @@ class Composer(tk.Frame):
         # поле ввода получает только то, что осталось.
         self._send_btn = _IconButton(self._input_wrap, _draw_send,
                                      self.submit, TEXT_BG)
-        self._send_btn.pack(side="right", padx=(2, 8), pady=7)
+        self._send_btn.pack(side="right", anchor="s",
+                            padx=(2, 8), pady=(0, 7))
         self._copy_btn = _IconButton(self._input_wrap, _draw_copy,
                                      self.copy_last, TEXT_BG)
-        self._copy_btn.pack(side="right", padx=(0, 2), pady=7)
+        self._copy_btn.pack(side="right", anchor="s",
+                            padx=(0, 2), pady=(0, 7))
 
         self._lang_btn = tk.Button(
             self._input_wrap, text=self._lang, bg=TEXT_BG,
@@ -99,15 +130,20 @@ class Composer(tk.Frame):
             bd=0, highlightthickness=0, takefocus=0,
             font=("Segoe UI", 9), padx=6, pady=1, cursor="hand2",
             command=self._open_lang_menu)
-        self._lang_btn.pack(side="left", padx=(8, 4), pady=7)
+        self._lang_btn.pack(side="left", anchor="s",
+                            padx=(8, 4), pady=(0, 7))
 
-        self._entry = tk.Entry(
-            self._input_wrap, width=1, bg=TEXT_BG, fg=TEXT_FG,
-            insertbackground=TEXT_FG, relief="flat", bd=0,
-            highlightthickness=0, font=self._font)
-        self._entry.pack(side="left", fill="x", expand=True,
+        # Многострочное поле: Enter отправляет, Shift+Enter переносит.
+        self._entry = tk.Text(
+            self._input_wrap, width=1, height=1, wrap="word",
+            bg=TEXT_BG, fg=TEXT_FG, insertbackground=TEXT_FG,
+            relief="flat", bd=0, highlightthickness=0,
+            font=self._font, padx=3, pady=2)
+        self._entry.pack(side="left", fill="both", expand=True,
                          padx=(2, 4), pady=7)
         self._entry.bind("<Return>", self._on_return)
+        self._entry.bind("<Shift-Return>", self._on_newline)
+        self._entry.bind("<Control-Return>", self._on_return)
         self._entry.bind("<Control-c>", self._entry_copy)
         self._entry.bind("<Control-C>", self._entry_copy)
         self._entry.bind("<Control-v>", self._entry_paste)
@@ -121,6 +157,22 @@ class Composer(tk.Frame):
         self.after_idle(self._draw_input_bg)
 
     # ---------- размеры / состояние ----------
+    @staticmethod
+    def _clamp_split(value):
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            value = DEFAULT_SPLIT
+        return max(0.2, min(0.9, value))
+
+    @classmethod
+    def _clamp_input(cls, value):
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            value = DEFAULT_INPUT_HEIGHT
+        return max(MIN_INPUT_HEIGHT, min(MAX_INPUT_HEIGHT, value))
+
     def toggle(self):
         self.set_expanded(not self._expanded)
 
@@ -130,7 +182,9 @@ class Composer(tk.Frame):
             return
         self._expanded = expanded
         if expanded:
-            self._input_wrap.pack(side="bottom", fill="x", padx=6, pady=6)
+            self._input_wrap.pack(side="bottom", fill="x", padx=6,
+                                  pady=(0, 6))
+            self._input_grip.pack(side="bottom", fill="x", padx=6)
             self._divider.pack(side="top", fill="x")
             self._history.pack(side="top", fill="both", expand=True)
             self.update_height(window_height)
@@ -141,6 +195,7 @@ class Composer(tk.Frame):
             self._close_lang_menu()
             self._history.pack_forget()
             self._divider.pack_forget()
+            self._input_grip.pack_forget()
             self._input_wrap.pack_forget()
             self.configure(height=1)
         if self._on_expanded:
@@ -150,6 +205,7 @@ class Composer(tk.Frame):
                 pass
 
     def update_height(self, window_height=None):
+        """Панель держит свою долю окна, поле ввода — свою высоту."""
         if not self._expanded:
             return
         if window_height is None:
@@ -157,12 +213,106 @@ class Composer(tk.Frame):
                 window_height = self.winfo_toplevel().winfo_height()
             except Exception:
                 window_height = 450
-        height = max(MIN_PANEL_HEIGHT, int(window_height * 2 / 3))
+        height = int(window_height * self._split)
+        height = max(MIN_PANEL_HEIGHT, height)
+        limit = max(1, int(window_height) - MIN_CHAT_HEIGHT)
+        if height > limit:
+            height = limit
         self._panel_height = height
         try:
             self.configure(height=height)
         except Exception:
             pass
+        self._apply_input_height()
+
+    def _apply_input_height(self):
+        panel = self._panel_height or self.winfo_height() or 300
+        limit = max(MIN_INPUT_HEIGHT, panel - MIN_HISTORY_HEIGHT)
+        height = max(MIN_INPUT_HEIGHT,
+                     min(self._input_height, limit))
+        try:
+            self._input_wrap.configure(height=height)
+        except Exception:
+            pass
+
+    # ---------- перетаскивание ручек ----------
+    def _bind_drag(self, widget, kind):
+        widget.bind("<ButtonPress-1>",
+                    lambda e, k=kind: self._drag_start(e, k))
+        widget.bind("<Double-Button-1>", self._drag_reset)
+
+    def _drag_start(self, event, kind):
+        self._drag_kind = kind
+        self._drag_y = event.y_root
+        self._drag_h = (self.winfo_height() if kind == "composer"
+                        else self._input_height)
+        self._grip_widget = event.widget
+        # Ведём перетаскивание на уровне окна: так движение не теряется,
+        # когда курсор уходит с тонкой ручки.
+        top = self.winfo_toplevel()
+        self._drag_motion_id = top.bind(
+            "<B1-Motion>", self._drag_motion, add="+")
+        self._drag_end_id = top.bind(
+            "<ButtonRelease-1>", self._drag_end, add="+")
+        return "break"
+
+    def _drag_motion(self, event):
+        if not self._drag_kind:
+            return "break"
+        delta = self._drag_y - event.y_root
+        if self._drag_kind == "composer":
+            try:
+                window_height = self.winfo_toplevel().winfo_height()
+            except Exception:
+                window_height = 450
+            limit = max(1, window_height - MIN_CHAT_HEIGHT)
+            height = max(MIN_PANEL_HEIGHT, self._drag_h + delta)
+            height = min(height, limit)
+            self._panel_height = height
+            self.configure(height=height)
+            self._split = height / max(1, window_height)
+            self._apply_input_height()
+        else:
+            limit = max(MIN_INPUT_HEIGHT,
+                        self._panel_height - MIN_HISTORY_HEIGHT)
+            height = max(MIN_INPUT_HEIGHT, self._drag_h + delta)
+            height = min(height, limit, MAX_INPUT_HEIGHT)
+            self._input_height = height
+            self._input_wrap.configure(height=height)
+        return "break"
+
+    def _drag_end(self, event):
+        if not self._drag_kind:
+            return "break"
+        top = self.winfo_toplevel()
+        for attr, seq in (("_drag_motion_id", "<B1-Motion>"),
+                          ("_drag_end_id", "<ButtonRelease-1>")):
+            funcid = getattr(self, attr, None)
+            setattr(self, attr, None)
+            if funcid:
+                try:
+                    top.unbind(seq, funcid)
+                except Exception:
+                    pass
+        self._drag_kind = None
+        self._grip_widget = None
+        self._notify_geometry()
+        return "break"
+
+    def _drag_reset(self, event):
+        self._split = DEFAULT_SPLIT
+        self._input_height = DEFAULT_INPUT_HEIGHT
+        self.update_height()
+        self._apply_input_height()
+        self._notify_geometry()
+        return "break"
+
+    def _notify_geometry(self):
+        if self._on_geometry_change:
+            try:
+                self._on_geometry_change(self._split, self._input_height)
+            except Exception:
+                pass
 
     # ---------- настройки отображения ----------
     def set_translation_color(self, color):
@@ -205,14 +355,27 @@ class Composer(tk.Frame):
             pass
         return "break"
 
-    def _on_return(self, event):
+    def _on_return(self, event=None):
         self.submit()
         return "break"
+
+    def _on_newline(self, event=None):
+        try:
+            self._entry.insert("insert", "\n")
+        except Exception:
+            pass
+        return "break"
+
+    def _entry_text(self):
+        try:
+            return self._entry.get("1.0", "end-1c")
+        except Exception:
+            return ""
 
     def submit(self):
         if self._busy:
             return
-        text = self._entry.get().strip()
+        text = self._entry_text().strip()
         if not text:
             return
         self._busy = True
@@ -377,7 +540,7 @@ class Composer(tk.Frame):
 
     def _entry_copy(self, event=None):
         try:
-            text = self._entry.selection_get()
+            text = self._entry.get("sel.first", "sel.last")
         except Exception:
             return "break"
         self._copy_raw(text)
@@ -396,7 +559,7 @@ class Composer(tk.Frame):
 
     def _entry_cut(self, event=None):
         try:
-            text = self._entry.selection_get()
+            text = self._entry.get("sel.first", "sel.last")
         except Exception:
             return "break"
         self._copy_raw(text)
@@ -407,8 +570,8 @@ class Composer(tk.Frame):
         return "break"
 
     def _entry_select_all(self, event=None):
-        self._entry.select_range(0, "end")
-        self._entry.icursor("end")
+        self._entry.tag_add("sel", "1.0", "end-1c")
+        self._entry.mark_set("insert", "end-1c")
         return "break"
 
     # ---------- поле ввода ----------
@@ -421,14 +584,14 @@ class Composer(tk.Frame):
                 return
             canvas.delete("bg")
             _round_rect(canvas, 1, 1, width - 1, height - 1,
-                        INPUT_RADIUS, fill=TEXT_BG, outline=FIELD_BORDER,
+                        10, fill=TEXT_BG, outline=FIELD_BORDER,
                         width=1, tags="bg")
             canvas.tag_lower("bg")
         except Exception:
             pass
 
     def _clear_entry(self):
-        self._entry.delete(0, "end")
+        self._entry.delete("1.0", "end")
 
     def _show_status(self, text, color=ACCENT):
         if self._status_job is not None:
@@ -496,6 +659,7 @@ class _IconButton(tk.Canvas):
 
 def _draw_plane(canvas, color, cx, cy, size, angle):
     """Рисует самолётик, повёрнутый на angle градусов."""
+    import math
     rad = math.radians(angle)
     cos_a, sin_a = math.cos(rad), math.sin(rad)
     points = []
