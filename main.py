@@ -15,6 +15,7 @@ import slang as slang_mod
 import system_info
 import updater
 import app_log
+import win_overlay
 from core import TranslatorEngine, DEFAULT_OUTGOING_PROMPT
 from wizard import SetupWizard
 from providers import create_backend, resolve_model, store_backend_config
@@ -1367,9 +1368,13 @@ class EveTranslatorApp(ctk.CTk):
             if self._collapsed:
                 self._toggle_collapse()
             self.deiconify()
-            self.lift()
-            self.attributes("-topmost", True)
-            self.focus_force()
+            hwnd = self._overlay_hwnd or win_overlay.root_hwnd(self)
+            self._overlay_hwnd = hwnd
+            # Показываем без активации: игра не должна сворачиваться.
+            win_overlay.set_noactivate(hwnd, True)
+            win_overlay.show_noactivate(hwnd)
+            if self._keep_on_top:
+                win_overlay.set_topmost(hwnd)
         except Exception:
             pass
 
@@ -2120,6 +2125,7 @@ class EveTranslatorApp(ctk.CTk):
             on_translate=self._request_outgoing,
             on_lang_change=self._on_composer_lang,
             on_expanded=self._on_composer_expanded,
+            on_activate=self._activate_for_input,
             on_geometry_change=self._on_composer_geometry,
             lang=self.config["ui"].get("composer_lang", "en"),
             autocopy=bool(self.config["ui"].get("composer_autocopy", True)),
@@ -2154,6 +2160,64 @@ class EveTranslatorApp(ctk.CTk):
         try:
             self._app_icon = _make_app_icon(64)
             self.iconphoto(True, self._app_icon)
+        except Exception:
+            pass
+
+        # Оверлей: не забираем фокус у игры. Активация — только по клику
+        # в поле ввода (см. _activate_for_input).
+        self._overlay_hwnd = win_overlay.install_noactivate(self)
+        self._keep_on_top = bool(self.config["window"].get("topmost", True))
+        if self._keep_on_top:
+            win_overlay.set_topmost(self._overlay_hwnd)
+        self.bind("<FocusOut>", self._on_root_focus_out, add="+")
+        # CustomTkinter вешает глобальный клик, который активирует окно.
+        # В режиме оверлея он мешает: убираем, чтобы клики не крали фокус.
+        try:
+            self.unbind_all("<Button-1>")
+        except Exception:
+            pass
+        self.after(2500, self._keep_topmost)
+
+    def _activate_for_input(self):
+        """Пользователь кликнул в поле ввода — можно забрать фокус."""
+        try:
+            hwnd = self._overlay_hwnd or win_overlay.root_hwnd(self)
+            self._overlay_hwnd = hwnd
+            win_overlay.set_noactivate(hwnd, False)
+            win_overlay.activate(hwnd)
+            self.focus_force()
+        except Exception:
+            pass
+
+    def _on_root_focus_out(self, event):
+        if event.widget is not self:
+            return
+        self.after(250, self._maybe_reenable_noactivate)
+
+    def _maybe_reenable_noactivate(self):
+        """Фокус ушёл в игру — снова не активируемся по кликам."""
+        try:
+            if not self.winfo_viewable():
+                return
+            hwnd = self._overlay_hwnd or win_overlay.root_hwnd(self)
+            self._overlay_hwnd = hwnd
+            fg = win_overlay.foreground_hwnd()
+            if hwnd and fg and fg != hwnd:
+                win_overlay.set_noactivate(hwnd, True)
+        except Exception:
+            pass
+
+    def _keep_topmost(self):
+        """Держим окно поверх игры, не забирая фокус."""
+        try:
+            if self._keep_on_top and self.winfo_viewable():
+                hwnd = self._overlay_hwnd or win_overlay.root_hwnd(self)
+                self._overlay_hwnd = hwnd
+                win_overlay.set_topmost(hwnd)
+        except Exception:
+            pass
+        try:
+            self.after(2500, self._keep_topmost)
         except Exception:
             pass
 
