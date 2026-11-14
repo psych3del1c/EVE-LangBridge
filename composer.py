@@ -8,6 +8,8 @@
 import time
 import tkinter as tk
 
+import win_overlay
+
 MIN_PANEL_HEIGHT = 150
 MIN_CHAT_HEIGHT = 60
 MIN_INPUT_HEIGHT = 42
@@ -40,8 +42,8 @@ class Composer(tk.Frame):
     """История исходящих переводов и многострочная строка ввода."""
 
     def __init__(self, master, tr_provider, on_translate, on_lang_change=None,
-                 on_expanded=None, on_geometry_change=None, lang="en",
-                 autocopy=True, split=DEFAULT_SPLIT,
+                 on_expanded=None, on_activate=None, on_geometry_change=None,
+                 lang="en", autocopy=True, split=DEFAULT_SPLIT,
                  input_height=DEFAULT_INPUT_HEIGHT,
                  translation_color="#00ff7f", font=None, font_size=12):
         super().__init__(master, bg=BG)
@@ -50,6 +52,7 @@ class Composer(tk.Frame):
         self._on_translate = on_translate
         self._on_lang_change = on_lang_change
         self._on_expanded = on_expanded
+        self._on_activate = on_activate
         self._on_geometry_change = on_geometry_change
         # Шрифт берём тот же, что в основном чате (пиксельный размер CTk).
         self._font = font if font is not None else ("Consolas", font_size)
@@ -144,6 +147,7 @@ class Composer(tk.Frame):
         self._entry.bind("<Return>", self._on_return)
         self._entry.bind("<Shift-Return>", self._on_newline)
         self._entry.bind("<Control-Return>", self._on_return)
+        self._entry.bind("<Button-1>", self._entry_click, add="+")
         self._entry.bind("<Control-c>", self._entry_copy)
         self._entry.bind("<Control-C>", self._entry_copy)
         self._entry.bind("<Control-v>", self._entry_paste)
@@ -190,7 +194,6 @@ class Composer(tk.Frame):
             self.update_height(window_height)
             self.update_idletasks()
             self._draw_input_bg()
-            self.after_idle(self._focus_entry)
         else:
             self._close_lang_menu()
             self._history.pack_forget()
@@ -347,13 +350,26 @@ class Composer(tk.Frame):
         return self._expanded
 
     # ---------- действия ----------
+    def _activate(self):
+        if self._on_activate:
+            try:
+                self._on_activate()
+            except Exception:
+                pass
+
     def _focus_entry(self, event=None):
+        # Клик по полю — осознанный уход из игры, можно активироваться.
+        self._activate()
         try:
             self._entry.focus_set()
             self.after_idle(self._entry.focus_set)
         except Exception:
             pass
         return "break"
+
+    def _entry_click(self, event=None):
+        self._activate()
+        return None
 
     def _on_return(self, event=None):
         self.submit()
@@ -422,6 +438,8 @@ class Composer(tk.Frame):
             top.overrideredirect(True)
             top.attributes("-topmost", True)
             top.configure(bg=FIELD_BORDER)
+            # Создаём скрытым, чтобы появление не активировало окно.
+            top.withdraw()
 
             body = tk.Frame(top, bg="#1f1f1f")
             body.pack(padx=1, pady=1)
@@ -447,7 +465,10 @@ class Composer(tk.Frame):
             top.geometry("+%d+%d" % (x, y))
             top.bind("<Escape>", lambda e: self._close_lang_menu())
             top.bind("<Button-1>", self._close_lang_menu, add="+")
-            top.focus_set()
+            popup_hwnd = win_overlay.install_noactivate(top)
+            win_overlay.set_noactivate(popup_hwnd, True)
+            top.deiconify()
+            win_overlay.show_noactivate(popup_hwnd)
             self._lang_popup = top
             # Клик в любом месте приложения закрывает попап.
             self._popup_bind_id = self.winfo_toplevel().bind(
@@ -458,7 +479,6 @@ class Composer(tk.Frame):
     def _pick_lang(self, code):
         self._close_lang_menu()
         self._choose_lang(code)
-        self.after_idle(self._focus_entry)
 
     def close_transient(self):
         """Закрывает всплывающие элементы панели."""
@@ -468,6 +488,7 @@ class Composer(tk.Frame):
         popup = getattr(self, "_lang_popup", None)
         self._lang_popup = None
         if popup is not None:
+            win_overlay.forget(popup)
             try:
                 popup.destroy()
             except Exception:
